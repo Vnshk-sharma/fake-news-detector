@@ -134,8 +134,7 @@ def download_and_train():
 
 
 if not models_exist():
-    st.markdown("<div style='text-align:center;padding:2rem 1rem'><div style='font-size:3rem'>🔍</div><h2 style='color:#a78bfa'>Fake News Detector</h2><p style='color:#64748b'>Setting up for the first time — please wait...</p></div>", unsafe_allow_html=True)
-    download_and_train()
+    st.error("Model files not found. Please contact the developer.")
     st.stop()
 DATA_DIR  = os.path.join(os.path.dirname(__file__), "../data")
 
