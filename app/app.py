@@ -50,27 +50,18 @@ def download_and_train():
     data_path = os.path.join(DATA_DIR, "news_fixed.csv")
 
     if not os.path.exists(data_path):
-        MIRRORS = [
-            "https://raw.githubusercontent.com/laxmimerit/All-CSV-ML-Data-Files-Download/master/WELFake_Dataset.csv",
-            "https://raw.githubusercontent.com/bhagyeshpatil/Fake-News-Detection/main/WELFake_Dataset.csv",
-            "https://raw.githubusercontent.com/joolsa/fake_real_news_dataset/master/fake_or_real_news.csv",
-        ]
-        progress   = st.progress(0, text="Downloading dataset...")
-        downloaded = False
-        for i, url in enumerate(MIRRORS):
-            try:
-                progress.progress(i * 10, text=f"Trying mirror {i+1} of {len(MIRRORS)}...")
-                urllib.request.urlretrieve(url, data_path)
-                downloaded = True
-                progress.progress(40, text="Download complete — preparing data...")
-                break
-            except Exception:
-                continue
-
-        if not downloaded:
+        progress = st.progress(10, text="Downloading dataset from Hugging Face...")
+        try:
+            from datasets import load_dataset
+            hf_ds = load_dataset("davanstrien/WELFake", split="train")
+            df_raw = hf_ds.to_pandas()
+            df_raw.to_csv(data_path, index=False)
+            progress.progress(40, text="Download complete — preparing data...")
+        except Exception as e:
             progress.empty()
-            st.error("❌ Could not download dataset from any mirror. Please try reloading the page.")
+            st.error(f"❌ Download failed: {e}")
             st.stop()
+
 
         df = pd.read_csv(data_path)
         df.columns = [c.lower().strip() for c in df.columns]

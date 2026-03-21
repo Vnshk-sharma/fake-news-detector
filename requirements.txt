@@ -6,3 +6,4 @@ streamlit>=1.30.0
 matplotlib>=3.7.0
 newsapi-python>=0.2.7
 scipy>=1.10.0
+datasets>=2.14.0
