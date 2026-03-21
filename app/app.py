@@ -52,7 +52,7 @@ def download_and_train():
 
         # Public mirror of the ISOT / WELFake dataset (permissive licence)
         # WELFake: 72K articles, pre-labelled, single CSV
-        DATA_URL = "https://raw.githubusercontent.com/SahandNZ/WELFake/main/WELFake_Dataset.csv"
+        DATA_URL = "https://raw.githubusercontent.com/laxmimerit/All-CSV-ML-Data-Files-Download/master/WELFake_Dataset.csv"
 
         progress = st.progress(0, text="Downloading dataset...")
         try:
