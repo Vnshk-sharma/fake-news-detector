@@ -50,18 +50,27 @@ def download_and_train():
     data_path = os.path.join(DATA_DIR, "news_fixed.csv")
 
     if not os.path.exists(data_path):
-        progress = st.progress(10, text="Downloading dataset from Hugging Face...")
-        try:
-            from datasets import load_dataset
-            hf_ds = load_dataset("davanstrien/WELFake", split="train")
-            df_raw = hf_ds.to_pandas()
-            df_raw.to_csv(data_path, index=False)
-            progress.progress(40, text="Download complete — preparing data...")
-        except Exception as e:
-            progress.empty()
-            st.error(f"❌ Download failed: {e}")
-            st.stop()
+        MIRRORS = [
+            "https://raw.githubusercontent.com/laxmimerit/All-CSV-ML-Data-Files-Download/master/WELFake_Dataset.csv",
+            "https://raw.githubusercontent.com/bhagyeshpatil/Fake-News-Detection/main/WELFake_Dataset.csv",
+            "https://raw.githubusercontent.com/joolsa/fake_real_news_dataset/master/fake_or_real_news.csv",
+        ]
+        progress   = st.progress(0, text="Downloading dataset...")
+        downloaded = False
+        for i, url in enumerate(MIRRORS):
+            try:
+                progress.progress(i * 10, text=f"Trying mirror {i+1} of {len(MIRRORS)}...")
+                urllib.request.urlretrieve(url, data_path)
+                downloaded = True
+                progress.progress(40, text="Download complete — preparing data...")
+                break
+            except Exception:
+                continue
 
+        if not downloaded:
+            progress.empty()
+            st.error("❌ Could not download dataset from any mirror. Please try reloading the page.")
+            st.stop()
 
         df = pd.read_csv(data_path)
         df.columns = [c.lower().strip() for c in df.columns]
@@ -134,7 +143,8 @@ def download_and_train():
 
 
 if not models_exist():
-    st.error("Model files not found. Please contact the developer.")
+    st.markdown("<div style='text-align:center;padding:2rem 1rem'><div style='font-size:3rem'>🔍</div><h2 style='color:#a78bfa'>Fake News Detector</h2><p style='color:#64748b'>Setting up for the first time — please wait...</p></div>", unsafe_allow_html=True)
+    download_and_train()
     st.stop()
 DATA_DIR  = os.path.join(os.path.dirname(__file__), "../data")
 
@@ -385,9 +395,11 @@ def tab_single(vectoriser, model):
         st.session_state.history.append({"label":label,"confidence":confidence,"snippet":news_input[:45]+"..."})
         if label == "FAKE":
             st.markdown("<div style='background:#450a0a;border:1px solid #dc2626;border-radius:12px;padding:16px 20px;margin:12px 0;display:flex;align-items:center;gap:12px'><span style='font-size:1.8rem'>❌</span><div><div style='font-size:1.2rem;font-weight:700;color:#fca5a5'>FAKE NEWS DETECTED</div><div style='font-size:0.85rem;color:#f87171'>This article shows strong indicators of misinformation</div></div></div>", unsafe_allow_html=True)
-        else:
+        elif label == "REAL":
             st.markdown("<div style='background:#052e16;border:1px solid #16a34a;border-radius:12px;padding:16px 20px;margin:12px 0;display:flex;align-items:center;gap:12px'><span style='font-size:1.8rem'>✅</span><div><div style='font-size:1.2rem;font-weight:700;color:#86efac'>APPEARS CREDIBLE</div><div style='font-size:0.85rem;color:#4ade80'>This article shows characteristics of legitimate news</div></div></div>", unsafe_allow_html=True)
             st.balloons()
+        else:
+            st.markdown("<div style='background:#1c1a05;border:1px solid #ca8a04;border-radius:12px;padding:16px 20px;margin:12px 0;display:flex;align-items:center;gap:12px'><span style='font-size:1.8rem'>⚠️</span><div><div style='font-size:1.2rem;font-weight:700;color:#fde047'>UNCERTAIN</div><div style='font-size:0.85rem;color:#fbbf24'>The model is not confident — verify this article from primary sources</div></div></div>", unsafe_allow_html=True)
         col_a, col_b = st.columns(2)
         with col_a: draw_confidence_gauge(confidence, label)
         with col_b:
