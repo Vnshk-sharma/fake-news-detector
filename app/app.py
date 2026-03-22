@@ -148,6 +148,14 @@ def render_sidebar(metadata, history):
         st.caption("Stack: scikit-learn · NLTK · Streamlit")
 
 def tab_single(vectoriser, model):
+    title_result = predict(headline, vectoriser, model)
+    body_result  = predict(body_text, vectoriser, model)
+
+    gap = abs(title_result["fake_prob"] - body_result["fake_prob"])
+
+    if gap > 0.3:
+        st.warning("⚠️ Headline and body text disagree — "
+               "this is a common pattern in clickbait articles.")
     st.markdown("<h2 style='font-size:1.5rem;font-weight:600;color:#e2e8f0;margin-bottom:0.2rem'>Analyse a Single Article</h2><p style='color:#64748b;margin-bottom:1.5rem;font-size:0.9rem'>Paste any news headline or full article text below</p>", unsafe_allow_html=True)
     for key, val in [("loaded_text",""),("history",[])]:
         if key not in st.session_state: st.session_state[key] = val
