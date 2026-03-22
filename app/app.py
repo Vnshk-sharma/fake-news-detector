@@ -27,41 +27,11 @@ st.set_page_config(page_title="Fake News Detector", page_icon="🔍", layout="wi
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "../src"))
 from preprocess import preprocess_text
-from explain import predict, get_top_tfidf_words
+from explain import predict, get_top_tfidf_words, analyse_writing_style, analyse_headline_vs_body
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "../models")
-DATA_DIR  = os.path.join(os.path.dirname(__file__), "../data")
 
-
-# ─── Option B: Auto-download + train on first launch ──────────────────────────
-
-def models_exist():
-    return all(
-        os.path.exists(os.path.join(MODEL_DIR, f))
-        for f in ["best_model.pkl", "tfidf_vectoriser.pkl", "metadata.pkl"]
-    )
-
-
-if not models_exist():
-    st.error("⚠️ Model files not found. Please contact the developer.")
-    st.stop()
-
-# ─── Option B: Auto-download dataset + train on first launch ──────────────────
-
-def models_exist():
-    return all(
-        os.path.exists(os.path.join(MODEL_DIR, f))
-        for f in ["best_model.pkl", "tfidf_vectoriser.pkl", "metadata.pkl"]
-    )
-
-
-
-# ─── Run auto-train if models don't exist ─────────────────────────────────────
-
-
-
-st.set_page_config(page_title="Fake News Detector", page_icon="🔍", layout="wide")
-
+# ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 #MainMenu, footer, header { visibility: hidden; }
@@ -86,6 +56,20 @@ html, body, [class*="css"] { font-family: 'Segoe UI', system-ui, sans-serif; col
 </style>
 """, unsafe_allow_html=True)
 
+
+# ── Check models exist ────────────────────────────────────────────────────────
+def models_exist():
+    return all(
+        os.path.exists(os.path.join(MODEL_DIR, f))
+        for f in ["best_model.pkl", "tfidf_vectoriser.pkl", "metadata.pkl"]
+    )
+
+if not models_exist():
+    st.error("⚠️ Model files not found. Please contact the developer.")
+    st.stop()
+
+
+# ── Load models ───────────────────────────────────────────────────────────────
 @st.cache_resource
 def load_models():
     def _load(name):
@@ -94,18 +78,21 @@ def load_models():
         with open(path, "rb") as f: return pickle.load(f)
     return _load("tfidf_vectoriser.pkl"), _load("best_model.pkl"), _load("metadata.pkl")
 
+
+# ── Chart helpers ─────────────────────────────────────────────────────────────
 def draw_confidence_gauge(confidence, label):
     fig, ax = plt.subplots(figsize=(4, 2.4), subplot_kw=dict(aspect="equal"))
     fig.patch.set_facecolor("#0f1117"); ax.set_facecolor("#0f1117"); ax.set_axis_off()
     theta = np.linspace(np.pi, 0, 200)
     ax.plot(np.cos(theta), np.sin(theta), lw=20, color="#1e2130", solid_capstyle="round")
     fill_theta = np.linspace(np.pi, np.pi - confidence * np.pi, 200)
-    color = "#ef4444" if label == "FAKE" else "#22c55e"
+    color = "#ef4444" if label == "FAKE" else "#22c55e" if label == "REAL" else "#f59e0b"
     ax.plot(np.cos(fill_theta), np.sin(fill_theta), lw=20, color=color, solid_capstyle="round")
     ax.text(0, -0.1, f"{confidence:.0%}", ha="center", va="center", fontsize=28, fontweight="bold", color=color)
     ax.text(0, -0.42, "Confidence", ha="center", va="center", fontsize=10, color="#64748b")
     ax.set_xlim(-1.35, 1.35); ax.set_ylim(-0.65, 1.35)
     st.pyplot(fig, use_container_width=True); plt.close(fig)
+
 
 def draw_word_importance(word_scores):
     if not word_scores: return
@@ -123,6 +110,8 @@ def draw_word_importance(word_scores):
               fontsize=8, frameon=False, labelcolor="#94a3b8", loc="lower right")
     plt.tight_layout(); st.pyplot(fig, use_container_width=True); plt.close(fig)
 
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 def render_sidebar(metadata, history):
     with st.sidebar:
         st.markdown("<div style='text-align:center;padding:1rem 0 0.5rem'><div style='font-size:2rem'>🔍</div><div style='font-size:1.1rem;font-weight:600;color:#a78bfa'>Fake News Detector</div><div style='font-size:0.75rem;color:#64748b;margin-top:4px'>AI-powered · NLP · ML</div></div>", unsafe_allow_html=True)
@@ -140,52 +129,62 @@ def render_sidebar(metadata, history):
         if history:
             st.markdown("#### 📜 Recent Predictions")
             for h in reversed(history[-6:]):
-                icon = "❌" if h["label"]=="FAKE" else "✅"
-                color = "#ef4444" if h["label"]=="FAKE" else "#22c55e"
+                icon  = "❌" if h["label"]=="FAKE" else "✅" if h["label"]=="REAL" else "⚠️"
+                color = "#ef4444" if h["label"]=="FAKE" else "#22c55e" if h["label"]=="REAL" else "#f59e0b"
                 st.markdown(f"<div style='font-size:12px;color:{color};padding:3px 0'>{icon} {h['snippet']} <span style='color:#64748b'>({h['confidence']:.0%})</span></div>", unsafe_allow_html=True)
             st.markdown("---")
         st.caption("Dataset: ISOT Fake News (44K articles)")
         st.caption("Stack: scikit-learn · NLTK · Streamlit")
 
+
+# ── Tab 1: Single article ─────────────────────────────────────────────────────
 def tab_single(vectoriser, model):
-    title_result = predict(headline, vectoriser, model)
-    body_result  = predict(body_text, vectoriser, model)
-
-    gap = abs(title_result["fake_prob"] - body_result["fake_prob"])
-
-    if gap > 0.3:
-        st.warning("⚠️ Headline and body text disagree — "
-               "this is a common pattern in clickbait articles.")
     st.markdown("<h2 style='font-size:1.5rem;font-weight:600;color:#e2e8f0;margin-bottom:0.2rem'>Analyse a Single Article</h2><p style='color:#64748b;margin-bottom:1.5rem;font-size:0.9rem'>Paste any news headline or full article text below</p>", unsafe_allow_html=True)
+
     for key, val in [("loaded_text",""),("history",[])]:
         if key not in st.session_state: st.session_state[key] = val
+
     with st.expander("📋 Load an example article"):
         c1, c2 = st.columns(2)
         if c1.button("🔴 Fake example", use_container_width=True):
             st.session_state.loaded_text = "SHOCKING: Government secretly adding fluoride to water supply to control the population. Whistleblowers reveal the truth mainstream media refuses to report. Big Pharma is hiding the cancer cure. Share before deleted!"
             st.rerun()
         if c2.button("🟢 Real example", use_container_width=True):
-            st.session_state.loaded_text = "The Reserve Bank of India raised interest rates by 25 basis points on Wednesday, marking the sixth consecutive hike as policymakers continued efforts to bring inflation back to the 4 percent target. The decision was unanimous among all committee members."
+            st.session_state.loaded_text = "The Federal Reserve raised interest rates by 25 basis points on Wednesday as policymakers continued efforts to bring inflation back to the 2 percent target. The decision was unanimous among committee members."
             st.rerun()
-    news_input = st.text_area("📰 Article text:", value=st.session_state.get("loaded_text",""), height=180, placeholder="Paste a news article or headline here...", label_visibility="collapsed")
+
+    # Two input boxes — headline and body separately
+    headline  = st.text_input("📰 Headline:", placeholder="Paste the article headline here...", value="")
+    news_input = st.text_area("📄 Article body:", value=st.session_state.get("loaded_text",""), height=150, placeholder="Paste the full article body here...")
+
     _, col_btn, _ = st.columns([1,2,1])
     with col_btn:
         analyse_btn = st.button("🔍  Analyse Article", use_container_width=True, type="primary", key="single_btn")
-    if analyse_btn and news_input.strip():
+
+    if analyse_btn and (news_input.strip() or headline.strip()):
+        # Use headline + body combined for main prediction
+        full_text = (headline + " " + news_input).strip()
+
         bar = st.progress(0, text="Preprocessing text...")
         for p in range(0,60,15): time.sleep(0.05); bar.progress(p, text="Preprocessing text...")
-        result = predict(news_input, vectoriser, model)
+        result = predict(full_text, vectoriser, model)
         for p in range(60,101,10): time.sleep(0.04); bar.progress(p, text="Running classifier...")
         bar.empty()
-        label = result["label"]; confidence = result["confidence"]
-        st.session_state.history.append({"label":label,"confidence":confidence,"snippet":news_input[:45]+"..."})
+
+        label      = result["label"]
+        confidence = result["confidence"]
+        st.session_state.history.append({"label":label,"confidence":confidence,"snippet":full_text[:45]+"..."})
+
+        # Verdict banner
         if label == "FAKE":
             st.markdown("<div style='background:#450a0a;border:1px solid #dc2626;border-radius:12px;padding:16px 20px;margin:12px 0;display:flex;align-items:center;gap:12px'><span style='font-size:1.8rem'>❌</span><div><div style='font-size:1.2rem;font-weight:700;color:#fca5a5'>FAKE NEWS DETECTED</div><div style='font-size:0.85rem;color:#f87171'>This article shows strong indicators of misinformation</div></div></div>", unsafe_allow_html=True)
         elif label == "REAL":
             st.markdown("<div style='background:#052e16;border:1px solid #16a34a;border-radius:12px;padding:16px 20px;margin:12px 0;display:flex;align-items:center;gap:12px'><span style='font-size:1.8rem'>✅</span><div><div style='font-size:1.2rem;font-weight:700;color:#86efac'>APPEARS CREDIBLE</div><div style='font-size:0.85rem;color:#4ade80'>This article shows characteristics of legitimate news</div></div></div>", unsafe_allow_html=True)
             st.balloons()
         else:
-            st.markdown("<div style='background:#1c1a05;border:1px solid #ca8a04;border-radius:12px;padding:16px 20px;margin:12px 0;display:flex;align-items:center;gap:12px'><span style='font-size:1.8rem'>⚠️</span><div><div style='font-size:1.2rem;font-weight:700;color:#fde047'>UNCERTAIN</div><div style='font-size:0.85rem;color:#fbbf24'>The model is not confident — verify this article from primary sources</div></div></div>", unsafe_allow_html=True)
+            st.markdown("<div style='background:#1c1a05;border:1px solid #ca8a04;border-radius:12px;padding:16px 20px;margin:12px 0;display:flex;align-items:center;gap:12px'><span style='font-size:1.8rem'>⚠️</span><div><div style='font-size:1.2rem;font-weight:700;color:#fde047'>UNCERTAIN</div><div style='font-size:0.85rem;color:#fbbf24'>The model is not confident — verify from primary sources</div></div></div>", unsafe_allow_html=True)
+
+        # Confidence gauge + probability bars
         col_a, col_b = st.columns(2)
         with col_a: draw_confidence_gauge(confidence, label)
         with col_b:
@@ -193,16 +192,62 @@ def tab_single(vectoriser, model):
             st.markdown("**Probability breakdown**")
             st.progress(result["real_prob"], text=f"✅ Real — {result['real_prob']:.1%}")
             st.progress(result["fake_prob"], text=f"❌ Fake — {result['fake_prob']:.1%}")
+
         st.markdown("---")
+
+        # Headline vs body check (only if both are provided)
+        if headline.strip() and news_input.strip():
+            st.markdown("### 📰 Headline vs Body Analysis")
+            hb = analyse_headline_vs_body(headline, news_input, vectoriser, model)
+            col_h, col_b2 = st.columns(2)
+            with col_h:
+                h_color = "#ef4444" if hb["headline_label"]=="FAKE" else "#22c55e" if hb["headline_label"]=="REAL" else "#f59e0b"
+                st.markdown(f"<div style='background:#1a1d27;border:1px solid #2d3148;border-radius:10px;padding:12px;text-align:center'><div style='font-size:0.75rem;color:#64748b'>Headline</div><div style='font-size:1.1rem;font-weight:600;color:{h_color}'>{hb['headline_label']}</div><div style='font-size:0.8rem;color:#64748b'>{hb['headline_fake_prob']:.0%} fake probability</div></div>", unsafe_allow_html=True)
+            with col_b2:
+                b_color = "#ef4444" if hb["body_label"]=="FAKE" else "#22c55e" if hb["body_label"]=="REAL" else "#f59e0b"
+                st.markdown(f"<div style='background:#1a1d27;border:1px solid #2d3148;border-radius:10px;padding:12px;text-align:center'><div style='font-size:0.75rem;color:#64748b'>Body</div><div style='font-size:1.1rem;font-weight:600;color:{b_color}'>{hb['body_label']}</div><div style='font-size:0.8rem;color:#64748b'>{hb['body_fake_prob']:.0%} fake probability</div></div>", unsafe_allow_html=True)
+
+            if hb["disagreement"] == "High":
+                st.warning(hb["message"])
+            elif hb["disagreement"] == "Moderate":
+                st.info(hb["message"])
+            else:
+                st.success(hb["message"])
+            st.markdown("---")
+
+        # Word importance chart
         st.markdown("### 🔬 Why this verdict?")
         st.caption("Words that most influenced the prediction")
-        word_scores = get_top_tfidf_words(news_input, vectoriser, model, n=12)
+        word_scores = get_top_tfidf_words(full_text, vectoriser, model, n=12)
         if word_scores: draw_word_importance(word_scores)
+
+        # Writing style analysis
+        st.markdown("---")
+        st.markdown("### ✍️ Writing Style Analysis")
+        style = analyse_writing_style(full_text)
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            s_color = "#ef4444" if style["score"] >= 40 else "#f59e0b" if style["score"] >= 20 else "#22c55e"
+            st.markdown(f"<div style='background:#1a1d27;border:1px solid #2d3148;border-radius:10px;padding:14px;text-align:center'><div style='font-size:2rem;font-weight:700;color:{s_color}'>{style['score']}/100</div><div style='font-size:0.85rem;color:{s_color};margin-top:4px'>{style['verdict']}</div><div style='font-size:0.75rem;color:#64748b;margin-top:2px'>Suspicion Score</div></div>", unsafe_allow_html=True)
+        with col_s2:
+            if style["red_flags"]:
+                st.markdown("**Red flags detected:**")
+                for flag in style["red_flags"]:
+                    st.markdown(f"🚩 {flag}")
+            else:
+                st.success("No red flags — writing style looks normal")
+
+        st.markdown("---")
+        st.caption("⚠️ AI tool — always verify from primary sources like Reuters, AP, BBC")
+
         with st.expander("🔧 View preprocessed text"):
             st.code(result.get("clean_text",""), language=None)
+
     elif analyse_btn:
         st.warning("Please enter some text first.", icon="⚠️")
 
+
+# ── Tab 2: Bulk CSV ───────────────────────────────────────────────────────────
 def tab_bulk(vectoriser, model):
     st.markdown("<h2 style='font-size:1.5rem;font-weight:600;color:#e2e8f0;margin-bottom:0.2rem'>Bulk CSV Analysis</h2><p style='color:#64748b;margin-bottom:1.5rem;font-size:0.9rem'>Upload a CSV file — get every row classified and download the results</p>", unsafe_allow_html=True)
     with st.expander("📌 CSV format required"):
@@ -227,14 +272,17 @@ def tab_bulk(vectoriser, model):
             df["fake_prob"]  = [f"{r['fake_prob']:.3f}" for r in results]
             df["real_prob"]  = [f"{r['real_prob']:.3f}" for r in results]
             n_fake = (df["prediction"]=="FAKE").sum()
+            n_real = (df["prediction"]=="REAL").sum()
             c1,c2,c3 = st.columns(3)
             c1.metric("Total Articles", len(df))
             c2.metric("Flagged FAKE", n_fake, delta=f"{n_fake/len(df):.0%} of total", delta_color="inverse")
-            c3.metric("Classified REAL", len(df)-n_fake)
+            c3.metric("Classified REAL", n_real)
             st.dataframe(df[[text_col,"prediction","confidence"]], use_container_width=True, height=300)
             st.download_button("⬇️  Download Full Results CSV", df.to_csv(index=False).encode("utf-8"), "fake_news_results.csv", "text/csv", use_container_width=True)
             st.toast(f"Done! Analysed {len(df):,} articles.", icon="✅")
 
+
+# ── Tab 3: Live news ──────────────────────────────────────────────────────────
 def tab_live_news(vectoriser, model):
     st.markdown("<h2 style='font-size:1.5rem;font-weight:600;color:#e2e8f0;margin-bottom:0.2rem'>Live News Headlines</h2><p style='color:#64748b;margin-bottom:1.5rem;font-size:0.9rem'>Fetch today's top headlines and run them through the detector in real time</p>", unsafe_allow_html=True)
     st.markdown("**Step 1 — Get a free API key** at [newsapi.org](https://newsapi.org) (takes 2 minutes, free)")
@@ -265,14 +313,16 @@ def tab_live_news(vectoriser, model):
             result = predict(title, vectoriser, model)
             label  = result["label"]; conf = result["confidence"]
             if label == "FAKE": fake_count += 1
-            bc = "#dc2626" if label=="FAKE" else "#16a34a"
-            bg = "#2d0a0a" if label=="FAKE" else "#0a2d1a"
-            ic = "❌" if label=="FAKE" else "✅"
-            lc = "#fca5a5" if label=="FAKE" else "#86efac"
+            bc = "#dc2626" if label=="FAKE" else "#ca8a04" if label=="UNCERTAIN" else "#16a34a"
+            bg = "#2d0a0a" if label=="FAKE" else "#1c1a05" if label=="UNCERTAIN" else "#0a2d1a"
+            ic = "❌" if label=="FAKE" else "⚠️" if label=="UNCERTAIN" else "✅"
+            lc = "#fca5a5" if label=="FAKE" else "#fde047" if label=="UNCERTAIN" else "#86efac"
             st.markdown(f"<div style='background:{bg};border:1px solid {bc};border-radius:10px;padding:12px 16px;margin-bottom:10px'><div style='display:flex;justify-content:space-between;align-items:flex-start'><div style='flex:1;margin-right:12px'><div style='font-size:0.95rem;color:#e2e8f0;font-weight:500;line-height:1.4;margin-bottom:4px'>{title}</div><div style='font-size:0.78rem;color:#64748b'>{source} &nbsp;·&nbsp; <a href='{url}' target='_blank' style='color:#6d28d9;text-decoration:none'>Read original ↗</a></div></div><div style='text-align:center;flex-shrink:0;min-width:70px'><div style='font-size:1.3rem'>{ic}</div><div style='font-size:0.75rem;font-weight:600;color:{lc}'>{label}</div><div style='font-size:0.7rem;color:#64748b'>{conf:.0%}</div></div></div></div>", unsafe_allow_html=True)
         st.markdown("---")
-        st.markdown(f"<div style='text-align:center;color:#94a3b8;font-size:0.9rem;padding:8px 0'>Analysed <b>{len(articles)}</b> headlines — <span style='color:#ef4444'><b>{fake_count} flagged FAKE</b></span> | <span style='color:#22c55e'><b>{len(articles)-fake_count} appear credible</b></span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align:center;color:#94a3b8;font-size:0.9rem;padding:8px 0'>Analysed <b>{len(articles)}</b> headlines — <span style='color:#ef4444'><b>{fake_count} flagged FAKE</b></span> | <span style='color:#22c55e'><b>{len(articles)-fake_count} appear credible or uncertain</b></span></div>", unsafe_allow_html=True)
 
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     vectoriser, model, metadata = load_models()
     if vectoriser is None or model is None:
